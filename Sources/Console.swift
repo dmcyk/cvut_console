@@ -8,43 +8,143 @@
 
 import Foundation
 
+public class HelpCommand: Command {
+    private var commands: [Command]
+    
+    init(otherCommands: [Command]) {
+        self.commands = otherCommands
+    }
+    
+    public func printHelp() {
+        print("Command: help")
+        print("\tFormat: \n\t\t-someArgument=value\n\t\t--someOption[=optionalValue]")
+        print("\tFor array values use following:\n\t\t-someArgument=1,2,3,4\n")
+        print("\tSome arguments may have default values, but when used they are required to have some value")
+        print("\tOptions won't be used when not given in arguments, when used without optional value they will act as flags with give default value")
+        print("\tUse --help flag with given command to see it's help\n\n")
+        print("\tprinting help for all commands...\n")
+        for cmd in commands {
+            cmd.printHelp()
+            print()
+        }
+    }
+    public func run(data: CommandData) throws {
+        printHelp()
+    }
 
-public indirect enum ArgumentValueType {
-    case int, double, array(ArgumentValueType)
+    public var parameters: [CommandParameter] = []
+
+    public var name: String = "help"
+    
 }
 
-public enum ArgumentValue {
+public class Console {
+    var arguments: [String]
+    var commands: [Command]
+    
+    public init(arguments: [String], commands _commands: [Command], trimFirst: Bool = true) throws {
+        var commands = _commands
+        commands.append(HelpCommand(otherCommands: _commands))
+        self.commands = commands
+        
+        if trimFirst {
+            guard arguments.count > 2 else {
+                throw CommandError.notEnoughArguments
+            }
+            self.arguments = Array(arguments.suffix(from: 1))
+        } else {
+            guard arguments.count > 1 else {
+                throw CommandError.notEnoughArguments
+            }
+            self.arguments = arguments
+        }
+    }
+    
+    public func run() throws {
+        for cmd in commands {
+            do {
+                try cmd.parse(arguments: arguments)
+                return
+            } catch CommandError.incorrectCommandName {
+            }
+            
+        }
+        print("\(arguments[0]) is an incorrect command")
+    }
+}
+
+public indirect enum ValueType: CustomStringConvertible {
+    case int, double, string, array(ValueType)
+    
+    public var description: String {
+        switch self {
+        case .int:
+            return "Int"
+        case .double:
+            return "Double"
+        case .string:
+            return "String"
+        case .array(let type):
+            return "Array<\(type.description)>"
+        }
+    }
+}
+
+public enum ValueError: Error {
+    case noValue
+}
+public enum Value: CustomStringConvertible {
     case int(Int)
     case double(Double)
-    case array([ArgumentValue])
+    case string(String)
+    case array([Value])
     
-    public var intValue: Int? {
+    public func intValue() throws -> Int {
         if case .int(let value) = self {
             return value
         }
-        return nil
+        throw ValueError.noValue
     }
     
-    public var doubleValue: Double? {
+    public func doubleValue() throws -> Double {
         if case .double(let value) = self {
             return value
         }
-        return nil
+        throw ValueError.noValue
     }
     
-    public var arrayValue: [ArgumentValue]? {
+    public func arrayValue() throws -> [Value] {
         if case .array(let value) = self {
             return value
         }
-        return nil
+        throw ValueError.noValue
     }
     
+    public func stringValue() throws -> String {
+        if case .string(let val) = self {
+            return val
+        }
+        throw ValueError.noValue
+    }
+    
+    public var description: String {
+        switch self {
+        case .int(let val):
+            return "Int(\(val))"
+        case .double(let val):
+            return "Double(\(val))"
+        case .string(let val):
+            return "String(\(val))"
+        case .array(let val):
+            return "Array(\(val.map { $0.description }.joined(separator: ",")))"
+        }
+    }
     
     
 }
 
 public enum ArgumentError: Error {
-    case noAssignment, incorrectValue, indirectValue, noValue
+    case noAssignment, incorrectValue, indirectValue, noValue, wrongFormat //no equal sign
 }
 
 public struct ContainedArgumentError: Error {
@@ -57,66 +157,251 @@ public struct ContainedArgumentError: Error {
     }
 }
 
-public struct Argument {
-    public var expected: ArgumentValueType
-    public var name: String
-    public var `default`: ArgumentValue?
+public protocol Command {
+    var help: [String] { get }
+    var name: String { get }
+    var parameters: [CommandParameter] { get }
     
-    public init(_ name: String, expectedValue: ArgumentValueType, `default`: ArgumentValue? = nil ) {
+    func run(data: CommandData) throws
+    func printHelp()
+
+}
+
+public extension Command {
+    var help: [String] {
+        return []
+    }
+    
+    func printHelp() {
+        print("Command: \(name)")
+        for line in help {
+            print(line)
+        }
+        print()
+        for param in parameters {
+            switch param {
+            case .argument(let arg):
+                print("\t- \(arg.name) Argument(\(arg.expected)) \(arg.description ?? "")")
+            case .option(let opt):
+                print("\t- \(opt.name) \(opt.expected != nil ? "Option(\(opt.default != nil ? "\(opt.default!)" : "\(opt.expected!)"))" : "Flag") \(opt.description ?? "")")
+            }
+        }
+    }
+    
+    func parse(arguments: [String]) throws {
+        guard arguments.count > 1, arguments[0] == name else {
+            throw CommandError.incorrectCommandName
+        }
+
+        if Option("help").flag(arguments) {
+            printHelp()
+            return
+        }
+        
+        let data = try CommandData(parameters, input: Array(arguments.suffix(from: 1)))
+        
+        
+        try run(data: data)
+        
+    }
+}
+
+public enum CommandError: Error {
+    case parameterNameNotAllowed
+    case notEnoughArguments
+    case incorrectCommandName
+}
+
+public struct CommandData {
+    private var arguments: [String: Argument]
+    private var options: [String: Option]
+    private var input: [String]
+    
+    public init(_ parameters: [CommandParameter], input: [String]) throws {
+        arguments = [:]
+        options = [:]
+        self.input = input
+        
+        for param in parameters {
+            switch param {
+            case .argument(let arg):
+                arguments[arg.name] = arg
+                if arg.default == nil && input.filter({
+                    $0.contains(arg.consoleName)
+                }).isEmpty  {
+                    throw CommandError.notEnoughArguments
+                }
+            case .option(let opt):
+                options[opt.name] = opt
+            }
+        }
+    }
+    
+    
+    
+    
+    public func value(_ argName: String) throws -> Value {
+
+        guard let argument = arguments[argName] else {
+            throw CommandError.parameterNameNotAllowed
+        }
+        return try argument.value(input)
+        
+    }
+    
+    public func flag(_ name: String) throws -> Bool {
+        guard let option = options[name] else {
+            throw CommandError.parameterNameNotAllowed
+        }
+        return option.flag(input)
+    }
+    
+    public func optionalValue(_ name: String) throws -> Value? {
+        guard let option = options[name] else {
+            throw CommandError.parameterNameNotAllowed
+        }
+        return option.value(input)
+    }
+}
+
+public enum CommandParameter {
+    case option(Option)
+    case argument(Argument)
+
+}
+
+public struct Option {
+    public var expected: ValueType? = nil
+    public var name: String
+    fileprivate var `default`: Value? = nil
+    public var description: String? = nil
+    
+
+    public init(_ name: String, description: String? = nil, expectedValue: ValueType? = nil, default: Value? = nil) {
         self.name = name
+        self.expected = expectedValue
+        self.description = description
+        self.default = `default`
+    }
+    
+    public func _flag(_ input: [String]) -> Bool {
+        for i in input {
+            if i == consoleName {
+                return true
+            }
+        }
+        return false
+    }
+    
+    public func flag(_ input: [String]) -> Bool {
+        return _flag(input) == true ? true : (value(input) != nil)
+        
+    }
+    
+    private func defaultValue(_ input: [String]) -> Value? {
+        if _flag(input) {
+            return `default`
+        }
+        return nil
+    }
+    
+    public func value(_ input: [String]) -> Value? {
+        guard let expected = expected else {
+            return defaultValue(input)
+        }
+        if let val = try? extractArgumentValue(input, nameFormat: "--\(name)", expected: expected, default: nil) {
+            return val
+        } else {
+            return defaultValue(input)
+        }
+        
+    }
+}
+
+public extension Option {
+    var consoleName: String {
+        return "--\(name)"
+    }
+}
+public struct Argument {
+    public var expected: ValueType
+    public var name: String
+    public var `default`: Value?
+    public var description: String? = nil
+    
+    public init(_ name: String, expectedValue: ValueType, description: String? = nil, `default`: Value? = nil ) {
+        self.name = name
+        self.description = description
         self.expected = expectedValue
         self.default = `default`
     }
     
-    private func extractNumber(_ src: String) throws -> NSNumber {
-        let numberFormatter = NumberFormatter()
-        numberFormatter.locale = Locale(identifier: "en-US")
-        guard let number = numberFormatter.number(from: src) else {
-            throw ArgumentError.incorrectValue
-        }
-        return number
+    public func value(_ input: [String]) throws -> Value {
+        return try extractArgumentValue(input, nameFormat: "-\(name)", expected: expected, default: `default`)
     }
-    
-    public func extract(_ srcs: [String]) throws -> ArgumentValue {
-        for src in srcs {
-            guard src.contains("--\(name)=") else {
-                continue
-            }
-            if let equal = src.characters.index(of: "=") {
-                let afterEqual = src.characters.index(after: equal)
-                let value = src.substring(from: afterEqual)
+}
+
+public extension Argument {
+    var consoleName: String {
+        return "-\(name)"
+    }
+}
+fileprivate func extractNumber(_ src: String) throws -> NSNumber {
+    let numberFormatter = NumberFormatter()
+    numberFormatter.locale = Locale(identifier: "en-US")
+    guard let number = numberFormatter.number(from: src) else {
+        throw ArgumentError.incorrectValue
+    }
+    return number
+}
+
+fileprivate func extractArgumentValue(_ srcs: [String], nameFormat: String, expected: ValueType, default: Value?) throws -> Value {
+    for src in srcs {
+        guard src.contains("\(nameFormat)=") else {
+            continue
+        }
+        if let equal = src.characters.index(of: "=") {
+            let afterEqual = src.characters.index(after: equal)
+            let value = src.substring(from: afterEqual)
+            
+            switch expected {
+            case .int, .double:
+                let number = try extractNumber(value)
                 
-                switch expected {
-                case .int, .double:
-                    let number = try extractNumber(value)
-                    
-                    if case .int = expected {
-                        return .int(number.intValue)
-                    } else {
-                        return .double(number.doubleValue)
-                    }
-                case .array(let inner):
-                    let values = value.components(separatedBy: ",")
-                    switch inner {
-                    case .double:
-                        return try .array(values.map {
-                            try .double(extractNumber($0).doubleValue)
-                        })
-                    case .int:
-                        return try .array(values.map {
-                            try .int(extractNumber($0).intValue)
-                        })
-                    case .array(_):
-                        throw ArgumentError.indirectValue
-                    }
-                    
+                if case .int = expected {
+                    return .int(number.intValue)
+                } else {
+                    return .double(number.doubleValue)
+                }
+            case .string:
+                return .string(value)
+            case .array(let inner):
+                let values = value.components(separatedBy: ",")
+                switch inner {
+                case .double:
+                    return try .array(values.map {
+                        try .double(extractNumber($0).doubleValue)
+                    })
+                case .int:
+                    return try .array(values.map {
+                        try .int(extractNumber($0).intValue)
+                    })
+                case .string:
+                    return .array(values.map {
+                        .string($0)
+                    })
+                case .array(_):
+                    throw ArgumentError.indirectValue
                 }
             }
-        }
-        if let def = self.default {
-            return def
         } else {
-            throw ArgumentError.noValue
+            throw ArgumentError.wrongFormat
         }
+        
+    }
+    if let def = `default` {
+        return def
+    } else {
+        throw ArgumentError.noValue
     }
 }
