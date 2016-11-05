@@ -356,10 +356,26 @@ public extension Argument {
         return "-\(name)"
     }
 }
-fileprivate func extractNumber(_ src: String) throws -> NSNumber {
-    let numberFormatter = NumberFormatter()
-    numberFormatter.locale = Locale(identifier: "en-US")
-    guard let number = numberFormatter.number(from: src) else {
+//fileprivate func extractNumber(_ src: String) throws -> NSNumber {
+//    let numberFormatter = NumberFormatter()
+//    numberFormatter.locale = Locale(identifier: "en-US")
+//    guard let number = numberFormatter.number(from: src) else {
+//        throw ArgumentError.incorrectValue
+//    }
+//    return number
+//}
+
+fileprivate func extractInt(_ src: String) throws -> Int {
+
+    guard let number = Int(src) else {
+        throw ArgumentError.incorrectValue
+    }
+    return number
+}
+
+fileprivate func extractDouble(_ src: String) throws -> Double {
+    
+    guard let number = Double(src) else {
         throw ArgumentError.incorrectValue
     }
     return number
@@ -375,14 +391,12 @@ fileprivate func extractArgumentValue(_ srcs: [String], nameFormat: String, expe
             let value = src.substring(from: afterEqual)
             
             switch expected {
-            case .int, .double:
-                let number = try extractNumber(value)
-                
-                if case .int = expected {
-                    return .int(number.intValue)
-                } else {
-                    return .double(number.doubleValue)
-                }
+            case .int:
+                let number = try extractInt(value)
+                return .int(number)
+            case .double:
+                let number = try extractDouble(value)
+                return .double(number)
             case .string:
                 return .string(value)
             case .array(let inner):
@@ -390,11 +404,11 @@ fileprivate func extractArgumentValue(_ srcs: [String], nameFormat: String, expe
                 switch inner {
                 case .double:
                     return try .array(values.map {
-                        try .double(extractNumber($0).doubleValue)
+                        try .double(extractDouble($0))
                     })
                 case .int:
                     return try .array(values.map {
-                        try .int(extractNumber($0).intValue)
+                        try .int(extractInt($0))
                     })
                 case .string:
                     return .array(values.map {
