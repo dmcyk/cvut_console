@@ -183,7 +183,13 @@ public extension Command {
             case .argument(let arg):
                 print("\t- \(arg.name) Argument(\(arg.expected)) \(arg.description ?? "")")
             case .option(let opt):
-                print("\t- \(opt.name) \(opt.expected != nil ? "Option(\(opt.default != nil ? "\(opt.default!)" : "\(opt.expected!)"))" : "Flag") \(opt.description ?? "")")
+                switch opt.mode {
+                case .onlyFlag:
+                    print("\t- \(opt.name) Flag \(opt.description ?? "")")
+                case .value(_, let def):
+                    print("\t- \(opt.name) Option(\(def)) \(opt.description ?? "")")
+
+                }
             }
         }
     }
@@ -193,7 +199,7 @@ public extension Command {
             throw CommandError.incorrectCommandName
         }
 
-        if Option("help").flag(arguments) {
+        if Option("help", mode: .onlyFlag).flag(arguments) {
             printHelp()
             return
         }
@@ -271,48 +277,52 @@ public enum CommandParameter {
 }
 
 public struct Option {
-    public var expected: ValueType? = nil
+    public enum Mode {
+        case onlyFlag
+        case value(expected: ValueType, `default`: Value)
+    }
     public var name: String
-    fileprivate var `default`: Value? = nil
+    fileprivate var mode: Mode
     public var description: String? = nil
     
 
-    public init(_ name: String, description: String? = nil, expectedValue: ValueType? = nil, default: Value? = nil) {
+    public init(_ name: String, description: String? = nil, mode: Mode) {
         self.name = name
-        self.expected = expectedValue
         self.description = description
-        self.default = `default`
+        self.mode = mode
     }
     
-    public func _flag(_ input: [String]) -> Bool {
+    public func flag(_ input: [String]) -> Bool {
+        
+        if case .onlyFlag = mode {
+            for i in input {
+                if i == consoleName {
+                    return true
+                }
+            }
+            return false
+        }
         for i in input {
-            if i == consoleName {
+            if i.contains(consoleName) {
                 return true
             }
         }
         return false
     }
     
-    public func flag(_ input: [String]) -> Bool {
-        return _flag(input) == true ? true : (value(input) != nil)
-        
-    }
-    
-    private func defaultValue(_ input: [String]) -> Value? {
-        if _flag(input) {
-            return `default`
-        }
-        return nil
-    }
     
     public func value(_ input: [String]) -> Value? {
-        guard let expected = expected else {
-            return defaultValue(input)
-        }
-        if let val = try? extractArgumentValue(input, nameFormat: "--\(name)", expected: expected, default: nil) {
-            return val
-        } else {
-            return defaultValue(input)
+        switch mode {
+        case .onlyFlag:
+            return nil
+        case .value(let expected, let def):
+            if flag(input) {
+                if let val = try? extractArgumentValue(input, nameFormat: "--\(name)", expected: expected, default: nil) {
+                    return val
+                }
+                return def
+            }
+            return nil
         }
         
     }
@@ -357,7 +367,7 @@ fileprivate func extractNumber(_ src: String) throws -> NSNumber {
 
 fileprivate func extractArgumentValue(_ srcs: [String], nameFormat: String, expected: ValueType, default: Value?) throws -> Value {
     for src in srcs {
-        guard src.contains("\(nameFormat)=") else {
+        guard src.contains("\(nameFormat)") else {
             continue
         }
         if let equal = src.characters.index(of: "=") {
