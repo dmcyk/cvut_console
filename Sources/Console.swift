@@ -184,7 +184,7 @@ public extension Command {
                 print("\t- \(arg.name) Argument(\(arg.expected)) \(arg.description ?? "")")
             case .option(let opt):
                 switch opt.mode {
-                case .onlyFlag:
+                case .flag:
                     print("\t- \(opt.name) Flag \(opt.description ?? "")")
                 case .value(_, let def):
                     print("\t- \(opt.name) Option(\(def)) \(opt.description ?? "")")
@@ -199,7 +199,7 @@ public extension Command {
             throw CommandError.incorrectCommandName
         }
 
-        if Option("help", mode: .onlyFlag).flag(arguments) {
+        if Option("help", mode: .flag).flag(arguments) {
             printHelp()
             return
         }
@@ -278,9 +278,10 @@ public enum CommandParameter {
 
 public struct Option {
     public enum Mode {
-        case onlyFlag
-        case value(expected: ValueType, `default`: Value)
+        case flag
+        case value(expected: ValueType, `default`: Value?)
     }
+    
     public var name: String
     fileprivate var mode: Mode
     public var description: String? = nil
@@ -294,7 +295,7 @@ public struct Option {
     
     public func flag(_ input: [String]) -> Bool {
         
-        if case .onlyFlag = mode {
+        if case .flag = mode {
             for i in input {
                 if i == consoleName {
                     return true
@@ -313,11 +314,11 @@ public struct Option {
     
     public func value(_ input: [String]) -> Value? {
         switch mode {
-        case .onlyFlag:
+        case .flag:
             return nil
         case .value(let expected, let def):
             if flag(input) {
-                if let val = try? extractArgumentValue(input, nameFormat: "--\(name)", expected: expected, default: nil) {
+                if let val = try? extractArgumentValue(input, nameFormat: consoleName, expected: expected, default: def) {
                     return val
                 }
                 return def
@@ -347,7 +348,7 @@ public struct Argument {
     }
     
     public func value(_ input: [String]) throws -> Value {
-        return try extractArgumentValue(input, nameFormat: "-\(name)", expected: expected, default: `default`)
+        return try extractArgumentValue(input, nameFormat: consoleName, expected: expected, default: `default`)
     }
 }
 
@@ -383,10 +384,13 @@ fileprivate func extractDouble(_ src: String) throws -> Double {
 
 fileprivate func extractArgumentValue(_ srcs: [String], nameFormat: String, expected: ValueType, default: Value?) throws -> Value {
     for src in srcs {
-        guard src.contains("\(nameFormat)") else {
-            continue
-        }
+        
+        
         if let equal = src.characters.index(of: "=") {
+            guard src.substring(to: equal) == nameFormat else {
+                continue
+            }
+        
             let afterEqual = src.characters.index(after: equal)
             let value = src.substring(from: afterEqual)
             
@@ -418,11 +422,11 @@ fileprivate func extractArgumentValue(_ srcs: [String], nameFormat: String, expe
                     throw ArgumentError.indirectValue
                 }
             }
-        } else {
-            throw ArgumentError.wrongFormat
         }
         
+        
     }
+    
     if let def = `default` {
         return def
     } else {
