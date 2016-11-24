@@ -121,6 +121,9 @@ public enum Value: CustomStringConvertible {
     
     public func stringValue() throws -> String {
         if case .string(let val) = self {
+            if val == "" {
+                throw ValueError.noValue
+            }
             return val
         }
         throw ValueError.noValue
