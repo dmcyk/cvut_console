@@ -17,14 +17,15 @@ public class HelpCommand: Command {
     
     public func printHelp() {
         print("Command: help")
-        print("\tFormat: \n\t\t-someArgument=value\n\t\t--someOption[=optionalValue]\n\t\t--someFlag")
+        print("\tFormat: \n\t\t-someArgument=value\n\t\t--someOption[=optionalValue]")
         print("\tFor array values use following:\n\t\t-someArgument=1,2,3,4\n")
-        print("\tArguments are required to have values")
-        print("\tOptions may either work only as flags, or as arguments with default values")
+        print("\tSome arguments may have default values, but when used they are required to have some value")
+        print("\tOptions won't be used when not given in arguments, when used without optional value they will act as flags with give default value")
         print("\tUse --help flag with given command to see it's help\n\n")
         print("\tprinting help for all commands...\n")
         for cmd in commands {
             cmd.printHelp()
+            print()
         }
     }
     public func run(data: CommandData) throws {
@@ -47,12 +48,12 @@ public class Console {
         self.commands = commands
         
         if trimFirst {
-            guard arguments.count > 1 else {
+            guard arguments.count > 2 else {
                 throw CommandError.notEnoughArguments
             }
             self.arguments = Array(arguments.suffix(from: 1))
         } else {
-            guard !arguments.isEmpty else {
+            guard arguments.count > 1 else {
                 throw CommandError.notEnoughArguments
             }
             self.arguments = arguments
@@ -121,9 +122,6 @@ public enum Value: CustomStringConvertible {
     
     public func stringValue() throws -> String {
         if case .string(let val) = self {
-            if val == "" {
-                throw ValueError.noValue
-            }
             return val
         }
         throw ValueError.noValue
@@ -174,50 +172,30 @@ public extension Command {
         return []
     }
     
-    fileprivate func printParameters(_ parameters: [CommandParameter]) {
-        for param in parameters {
-            switch param {
-            case .argument(let arg):
-                print("\t-\(arg.name) Argument(\(arg.expected)) \(arg.description ?? "")")
-            case .option(let opt):
-                switch opt.mode {
-                case .flag:
-                    print("\t--\(opt.name) Flag \(opt.description ?? "")")
-                case .value(let expected, let def):
-                    print("\t--\(opt.name) Option(\(def != nil ? "\(def!)" : "\(expected)")) \(opt.description ?? "")")
-                    
-                }
-            }
-        }
-    }
-    
     func printHelp() {
         print("Command: \(name)")
         for line in help {
             print(line)
         }
         print()
-        var options: [CommandParameter] = []
-        var arguments: [CommandParameter] = []
-        for p in parameters {
-            switch p {
-            case .argument(_):
-                arguments.append(p)
-            case .option(_):
-                options.append(p)
+        for param in parameters {
+            switch param {
+            case .argument(let arg):
+                print("\t- \(arg.name) Argument(\(arg.expected)) \(arg.description ?? "")")
+            case .option(let opt):
+                switch opt.mode {
+                case .flag:
+                    print("\t- \(opt.name) Flag \(opt.description ?? "")")
+                case .value(_, let def):
+                    print("\t- \(opt.name) Option(\(def)) \(opt.description ?? "")")
+
+                }
             }
         }
-        printParameters(arguments)
-        if !options.isEmpty {
-            print()
-            printParameters(options)
-        }
-        print()
-        
     }
     
     func parse(arguments: [String]) throws {
-        guard !arguments.isEmpty, arguments[0] == name else {
+        guard arguments.count > 1, arguments[0] == name else {
             throw CommandError.incorrectCommandName
         }
 
@@ -235,8 +213,7 @@ public extension Command {
 }
 
 public enum CommandError: Error {
-    case parameterNameNotAllowed(String)
-    case missingCommandArguments
+    case parameterNameNotAllowed
     case notEnoughArguments
     case incorrectCommandName
 }
@@ -255,10 +232,10 @@ public struct CommandData {
             switch param {
             case .argument(let arg):
                 arguments[arg.name] = arg
-                if input.filter({
-                    $0.contains(arg.consoleName + "=")
+                if arg.default == nil && input.filter({
+                    $0.contains(arg.consoleName)
                 }).isEmpty  {
-                    throw CommandError.missingCommandArguments
+                    throw CommandError.notEnoughArguments
                 }
             case .option(let opt):
                 options[opt.name] = opt
@@ -267,9 +244,12 @@ public struct CommandData {
     }
     
     
+    
+    
     public func value(_ argName: String) throws -> Value {
+
         guard let argument = arguments[argName] else {
-            throw CommandError.parameterNameNotAllowed(argName)
+            throw CommandError.parameterNameNotAllowed
         }
         return try argument.value(input)
         
@@ -277,14 +257,14 @@ public struct CommandData {
     
     public func flag(_ name: String) throws -> Bool {
         guard let option = options[name] else {
-            throw CommandError.parameterNameNotAllowed(name)
+            throw CommandError.parameterNameNotAllowed
         }
         return option.flag(input)
     }
     
     public func optionalValue(_ name: String) throws -> Value? {
         guard let option = options[name] else {
-            throw CommandError.parameterNameNotAllowed(name)
+            throw CommandError.parameterNameNotAllowed
         }
         return option.value(input)
     }
@@ -299,9 +279,8 @@ public enum CommandParameter {
 public struct Option {
     public enum Mode {
         case flag
-        case value(expected: ValueType, `default`: Value?)
+        case value(expected: ValueType, `default`: Value)
     }
-    
     public var name: String
     fileprivate var mode: Mode
     public var description: String? = nil
@@ -321,8 +300,13 @@ public struct Option {
                     return true
                 }
             }
+            return false
         }
-        
+        for i in input {
+            if i.contains(consoleName) {
+                return true
+            }
+        }
         return false
     }
     
@@ -332,11 +316,13 @@ public struct Option {
         case .flag:
             return nil
         case .value(let expected, let def):
-            if let val = try? extractArgumentValue(input, nameFormat: consoleName, expected: expected, default: def) {
-                return val
+            if flag(input) {
+                if let val = try? extractArgumentValue(input, nameFormat: "--\(name)", expected: expected, default: nil) {
+                    return val
+                }
+                return def
             }
-            return def
-           
+            return nil
         }
         
     }
@@ -350,16 +336,18 @@ public extension Option {
 public struct Argument {
     public var expected: ValueType
     public var name: String
+    public var `default`: Value?
     public var description: String? = nil
     
-    public init(_ name: String, expectedValue: ValueType, description: String? = nil) {
+    public init(_ name: String, expectedValue: ValueType, description: String? = nil, `default`: Value? = nil ) {
         self.name = name
         self.description = description
         self.expected = expectedValue
+        self.default = `default`
     }
     
     public func value(_ input: [String]) throws -> Value {
-        return try extractArgumentValue(input, nameFormat: consoleName, expected: expected, default: nil)
+        return try extractArgumentValue(input, nameFormat: "-\(name)", expected: expected, default: `default`)
     }
 }
 
@@ -367,8 +355,15 @@ public extension Argument {
     var consoleName: String {
         return "-\(name)"
     }
-    
 }
+//fileprivate func extractNumber(_ src: String) throws -> NSNumber {
+//    let numberFormatter = NumberFormatter()
+//    numberFormatter.locale = Locale(identifier: "en-US")
+//    guard let number = numberFormatter.number(from: src) else {
+//        throw ArgumentError.incorrectValue
+//    }
+//    return number
+//}
 
 fileprivate func extractInt(_ src: String) throws -> Int {
 
@@ -388,12 +383,10 @@ fileprivate func extractDouble(_ src: String) throws -> Double {
 
 fileprivate func extractArgumentValue(_ srcs: [String], nameFormat: String, expected: ValueType, default: Value?) throws -> Value {
     for src in srcs {
-        
+        guard src.contains("\(nameFormat)") else {
+            continue
+        }
         if let equal = src.characters.index(of: "=") {
-            guard src.substring(to: equal) == nameFormat else {
-                continue
-            }
-        
             let afterEqual = src.characters.index(after: equal)
             let value = src.substring(from: afterEqual)
             
@@ -425,10 +418,11 @@ fileprivate func extractArgumentValue(_ srcs: [String], nameFormat: String, expe
                     throw ArgumentError.indirectValue
                 }
             }
+        } else {
+            throw ArgumentError.wrongFormat
         }
         
     }
-    
     if let def = `default` {
         return def
     } else {
