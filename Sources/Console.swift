@@ -266,7 +266,7 @@ public struct CommandData {
         guard let option = options[name] else {
             throw CommandError.parameterNameNotAllowed
         }
-        return option.value(input)
+        return try option.value(input)
     }
 }
 
@@ -281,6 +281,11 @@ public struct Option {
         case flag
         case value(expected: ValueType, `default`: Value)
     }
+    
+    public enum Error: Swift.Error {
+        case requestedValueInFlagMode
+    }
+    
     public var name: String
     fileprivate var mode: Mode
     public var description: String? = nil
@@ -311,10 +316,10 @@ public struct Option {
     }
     
     
-    public func value(_ input: [String]) -> Value? {
+    public func value(_ input: [String]) throws -> Value? {
         switch mode {
         case .flag:
-            return nil
+            throw Error.requestedValueInFlagMode
         case .value(let expected, let def):
             if flag(input) {
                 if let val = try? extractArgumentValue(input, nameFormat: "--\(name)", expected: expected, default: nil) {
