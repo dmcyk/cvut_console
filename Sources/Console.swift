@@ -74,7 +74,7 @@ public class Console {
 }
 
 public indirect enum ValueType: CustomStringConvertible {
-    case int, double, string, array(ValueType)
+    case int, double, string, array(ValueType), compound
     
     public var description: String {
         switch self {
@@ -86,18 +86,41 @@ public indirect enum ValueType: CustomStringConvertible {
             return "String"
         case .array(let type):
             return "Array<\(type.description)>"
+        case .compound:
+            return "Compound"
+        }
+    }
+}
+
+extension ValueType: Equatable {
+    
+    public static func ==(lhs: ValueType, rhs: ValueType) -> Bool {
+        switch (lhs, rhs) {
+        case (.int, .int):
+            return true
+        case (.double, .double):
+            return true
+        case (.string, .string):
+            return true
+        case (.compound, .compound):
+            return true
+        case (.array(let _lhs),.array(let _rhs)):
+            return _lhs == _rhs
+        default:
+            return false
         }
     }
 }
 
 public enum ValueError: Error {
-    case noValue
+    case noValue, compundIsNotTopLevelType
 }
+
 public enum Value: CustomStringConvertible {
     case int(Int)
     case double(Double)
     case string(String)
-    case array([Value])
+    case array([Value], ValueType)
     
     public func intValue() throws -> Int {
         if case .int(let value) = self {
@@ -114,7 +137,7 @@ public enum Value: CustomStringConvertible {
     }
     
     public func arrayValue() throws -> [Value] {
-        if case .array(let value) = self {
+        if case .array(let value, _) = self {
             return value
         }
         throw ValueError.noValue
@@ -135,12 +158,79 @@ public enum Value: CustomStringConvertible {
             return "Double(\(val))"
         case .string(let val):
             return "String(\(val))"
-        case .array(let val):
-            return "Array(\(val.map { $0.description }.joined(separator: ",")))"
+        case .array(let val, let type):
+            return "Array<\(type.description)>(\(val.map { $0.description }.joined(separator: ",")))"
         }
     }
     
+    public var type: ValueType {
+        switch self {
+        case .int:
+            return .int
+        case .double:
+            return .double
+        case .string:
+            return .string
+        case .array(_, let type):
+            return .array(type)
+        }
+    }
     
+}
+
+extension Value: ExpressibleByIntegerLiteral {
+    public typealias IntegerLiteralType = Int
+    
+    public init(integerLiteral value: IntegerLiteralType) {
+        self = .int(value)
+    }
+}
+
+extension Value: ExpressibleByFloatLiteral {
+    public typealias FloatLiteralType = Double
+    
+    public init(floatLiteral value: FloatLiteralType) {
+        self = .double(value)
+    }
+}
+
+extension Value: ExpressibleByStringLiteral {
+    public typealias StringLiteralType = String
+    
+    public init(stringLiteral value: StringLiteralType) {
+        self = .string(value)
+    }
+    
+    public typealias UnicodeScalarLiteralType = String
+    
+    public init(unicodeScalarLiteral value: UnicodeScalarLiteralType) {
+        self = .string(value)
+    }
+    
+    public typealias ExtendedGraphemeClusterLiteralType = String
+    
+    public init(extendedGraphemeClusterLiteral value: ExtendedGraphemeClusterLiteralType) {
+        self = .string(value)
+    }
+}
+
+extension Value: ExpressibleByArrayLiteral {
+    public typealias Element = Value
+    
+    public init(arrayLiteral elements: Element...) {
+        var type: ValueType = .compound
+        if !elements.isEmpty {
+            type = elements[0].type
+            for e in elements.suffix(from: 1) {
+                
+                if e.type != type {
+                    type = .compound
+                    break
+                }
+            }
+        }
+        self = .array(elements, type)
+    }
 }
 
 public enum ArgumentError: Error {
@@ -361,14 +451,6 @@ public extension Argument {
         return "-\(name)"
     }
 }
-//fileprivate func extractNumber(_ src: String) throws -> NSNumber {
-//    let numberFormatter = NumberFormatter()
-//    numberFormatter.locale = Locale(identifier: "en-US")
-//    guard let number = numberFormatter.number(from: src) else {
-//        throw ArgumentError.incorrectValue
-//    }
-//    return number
-//}
 
 fileprivate func extractInt(_ src: String) throws -> Int {
 
@@ -410,19 +492,34 @@ fileprivate func extractArgumentValue(_ srcs: [String], nameFormat: String, expe
                 case .double:
                     return try .array(values.map {
                         try .double(extractDouble($0))
-                    })
+                    }, .double)
                 case .int:
                     return try .array(values.map {
                         try .int(extractInt($0))
-                    })
+                    }, .int)
                 case .string:
                     return .array(values.map {
                         .string($0)
-                    })
+                    }, .string)
+                case .compound:
+                    let values: [Value] = values.flatMap {
+                        if let d: Value = try? .double(extractDouble($0)) {
+                            return d
+                        } else if let i: Value = try? .int(extractInt($0)) {
+                            return i
+                        } else {
+                            return .string($0)
+                        }
+                    }
+                    return .array(values, .compound)
                 case .array(_):
                     throw ArgumentError.indirectValue
+                    
                 }
+            case .compound:
+                throw ValueError.compundIsNotTopLevelType
             }
+            
         } else {
             throw ArgumentError.wrongFormat
         }
