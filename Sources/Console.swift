@@ -48,8 +48,8 @@ public class HelpCommand: Command {
 }
 
 public class Console {
-    var arguments: [String]
-    var commands: [Command]
+    public var arguments: [String]
+    private var commands: [Command]
     
     public init(arguments: [String], commands _commands: [Command], trimFirst: Bool = true) throws {
         var commands = _commands
@@ -82,7 +82,7 @@ public class Console {
 }
 
 public indirect enum ValueType: CustomStringConvertible {
-    case int, double, string, array(ValueType), compound
+    case int, double, string, array(ValueType), bool, compound
     
     public var description: String {
         switch self {
@@ -94,6 +94,8 @@ public indirect enum ValueType: CustomStringConvertible {
             return "String"
         case .array(let type):
             return "Array<\(type.description)>"
+        case .bool:
+            return "Bool"
         case .compound:
             return "Compound"
         }
@@ -129,6 +131,7 @@ public enum Value: CustomStringConvertible {
     case double(Double)
     case string(String)
     case array([Value], ValueType)
+    case bool(Bool)
     
     public func intValue() throws -> Int {
         if case .int(let value) = self {
@@ -158,6 +161,13 @@ public enum Value: CustomStringConvertible {
         throw ValueError.noValue
     }
     
+    public func boolValue() throws -> Bool {
+        if case .bool(let val) = self {
+            return val
+        }
+        throw ValueError.noValue
+    }
+    
     public var description: String {
         switch self {
         case .int(let val):
@@ -168,6 +178,23 @@ public enum Value: CustomStringConvertible {
             return "String(\(val))"
         case .array(let val, let type):
             return "Array<\(type.description)>(\(val.map { $0.description }.joined(separator: ",")))"
+        case .bool(let val):
+            return "Bool(\(val))"
+        }
+    }
+    
+    public var string: String {
+        switch self {
+        case .int(let val):
+            return "\(val)"
+        case .double(let val):
+            return "\(val)"
+        case .string(let val):
+            return val
+        case .bool(let val):
+            return val ? "true" : "false"
+        case .array(let val, _):
+            return val.map( { $0.string }).joined(separator: ",")
         }
     }
     
@@ -181,6 +208,8 @@ public enum Value: CustomStringConvertible {
             return .string
         case .array(_, let type):
             return .array(type)
+        case .bool:
+            return .bool
         }
     }
     
@@ -220,6 +249,42 @@ extension Value: ExpressibleByStringLiteral {
     public init(extendedGraphemeClusterLiteral value: ExtendedGraphemeClusterLiteralType) {
         self = .string(value)
     }
+}
+
+extension Value: Equatable {
+    
+    public static func ==(lhs: Value, rhs: Value) -> Bool {
+        switch (lhs, rhs) {
+        case (.int(let lval), .int(let rval)):
+            return lval == rval
+        case (.double(let lval), .double(let rval)):
+            return lval == rval
+        case (.string(let lval), .string(let rval)):
+            return lval == rval
+        case (.bool(let lval), .bool(let rval)):
+            return lval == rval
+        case (.array(let lval), .array(let rval)):
+            return lval.0 == rval.0
+        default:
+            return false
+        }
+    }
+}
+
+extension Value: Comparable {
+    public static func <(lhs: Value, rhs: Value) -> Bool {
+        switch (lhs, rhs) {
+        case (.int(let lval), .int(let rval)):
+            return lval < rval
+        case (.double(let lval), .double(let rval)):
+            return lval < rval
+        case (.string(let lval), .string(let rval)):
+            return lval < rval
+        default:
+            return false
+        }
+    }
+    
 }
 
 extension Value: ExpressibleByArrayLiteral {
@@ -531,6 +596,17 @@ fileprivate func extractDouble(_ src: String) throws -> Double {
     return number
 }
 
+fileprivate func extractBool(_ src: String) throws -> Value {
+    let lower = src.lowercased()
+    if lower == "false" || lower == "0" {
+        return .bool(false)
+    } else if lower == "true" || lower == "1" {
+        return .bool(true)
+    } else {
+        throw ArgumentError.incorrectValue
+    }
+}
+
 fileprivate func extractValue(expected: ValueType, strValue value: String) throws -> Value {
     switch expected {
     case .int:
@@ -541,6 +617,8 @@ fileprivate func extractValue(expected: ValueType, strValue value: String) throw
         return .double(number)
     case .string:
         return .string(value)
+    case .bool:
+        return try extractBool(value)
     case .array(let inner):
         let values = value.components(separatedBy: ",")
         switch inner {
@@ -556,6 +634,10 @@ fileprivate func extractValue(expected: ValueType, strValue value: String) throw
             return .array(values.map {
                 .string($0)
             }, .string)
+        case .bool:
+            return try .array(values.map {
+                try extractBool($0)
+            }, .bool)
         case .compound:
             let values: [Value] = values.flatMap {
                 if let d: Value = try? .double(extractDouble($0)) {
