@@ -20,7 +20,7 @@ public class HelpCommand: Command {
         print("\tFormat: \n\t\t-someArgument=value\n\t\t--someOption[=optionalValue]")
         print("\tFor array values use following:\n\t\t-someArgument=1,2,3,4\n")
         print("\tSome arguments may have default values, but when used they are required to have some value")
-        print("\tOptions won't be used when not given in arguments, when used without optional value they will act as flags with give default value")
+        print("\tOptions won't be used when not given in arguments, when used without optional value they will act as flags or be used with given default value")
         print("\n\tUse --help flag with a given command to see it's help\n\tOr it's name with the `help` command, i.e., `help otherCommand`\n\n")
         print("\tprinting help for all commands...\n")
         for cmd in commands {
@@ -464,7 +464,7 @@ public enum CommandParameter {
 public struct Option {
     public enum Mode {
         case flag
-        case value(expected: ValueType, `default`: Value)
+        case value(expected: ValueType, `default`: Value?)
     }
     
     public enum Error: Swift.Error {
