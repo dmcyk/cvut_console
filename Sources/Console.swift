@@ -40,9 +40,9 @@ public class HelpCommand: Command {
             }
         }
     }
-
+    
     public var parameters: [CommandParameter] = []
-
+    
     public var name: String = "help"
     
 }
@@ -340,7 +340,7 @@ public protocol Command {
     
     func run(data: CommandData) throws
     func printHelp()
-
+    
 }
 
 public extension Command {
@@ -363,8 +363,8 @@ public extension Command {
                 case .flag:
                     print("\t- \(opt.name) Flag \(opt.description ?? "")")
                 case .value(_, let def):
-                    print("\t- \(opt.name) Option(\(def)) \(opt.description ?? "")")
-
+                    print("\t- \(opt.name) Option(\(def ?? "")) \(opt.description ?? "")")
+                    
                 }
             }
         }
@@ -375,7 +375,7 @@ public extension Command {
         guard !arguments.isEmpty && arguments[0] == name else {
             throw CommandError.incorrectCommandName
         }
-
+        
         if Option("help", mode: .flag).flag(arguments) {
             printHelp()
             return
@@ -432,7 +432,7 @@ public struct CommandData {
     
     
     public func argumentValue(_ argName: String) throws -> Value {
-
+        
         guard let argument = arguments[argName] else {
             throw CommandError.parameterNameNotAllowed
         }
@@ -458,7 +458,7 @@ public struct CommandData {
 public enum CommandParameter {
     case option(Option)
     case argument(Argument)
-
+    
 }
 
 public struct Option {
@@ -475,7 +475,7 @@ public struct Option {
     fileprivate var mode: Mode
     public var description: String? = nil
     
-
+    
     public init(_ name: String, description: String? = nil, mode: Mode) {
         self.name = name
         self.description = description
@@ -581,7 +581,7 @@ public extension Argument {
 }
 
 fileprivate func extractInt(_ src: String) throws -> Int {
-
+    
     guard let number = Int(src) else {
         throw ArgumentError.incorrectValue
     }
