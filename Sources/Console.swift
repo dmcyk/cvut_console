@@ -22,11 +22,8 @@ public class HelpCommand: Command {
         print("\tSome arguments may have default values, but when used they are required to have some value")
         print("\tOptions won't be used when not given in arguments, when used without optional value they will act as flags or be used with given default value")
         print("\n\tUse --help flag with a given command to see it's help\n\tOr it's name with the `help` command, i.e., `help otherCommand`\n\n")
-        print("\tprinting help for all commands...\n")
-        for cmd in commands {
-            cmd.printHelp()
-        }
     }
+
     public func run(data: CommandData) throws {
         if data.input.isEmpty {
             printHelp()
